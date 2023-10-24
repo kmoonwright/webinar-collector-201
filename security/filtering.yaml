@@ -1,0 +1,69 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+processors:
+  batch:
+  filter/ottl:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["container.name"] == "app_container_1"'
+        - 'resource.attributes["host.name"] == "localhost"'
+        - 'name == "app_3"'
+      spanevent:
+        - 'attributes["grpc"] == true'
+        - 'IsMatch(name, ".*grpc.*")'
+    metrics:
+      metric:
+          - 'name == "my.metric" and resource.attributes["my_label"] == "abc123"'
+          - 'type == METRIC_DATA_TYPE_HISTOGRAM'
+      datapoint:
+          - 'metric.type == METRIC_DATA_TYPE_SUMMARY'
+          - 'resource.attributes["service.name"] == "my_service_name"'
+    logs:
+      log_record:
+        - 'IsMatch(body, ".*password.*")'
+        - 'severity_number < SEVERITY_NUMBER_WARN'
+  filter/httponly:
+    error_mode: ignore
+    traces:
+      span:
+        - attributes["http.request.method"] == nil
+  filter/drophttp:
+    error_mode: ignore
+    traces:
+      span:
+        - attributes["http.request.method"] != nil
+  filter/dropempty:
+    error_mode: ignore
+    metrics:
+      metric:
+        - type == METRIC_DATA_TYPE_NONE
+        
+exporters:
+  otlp:
+    endpoint: otelcol:4317
+
+extensions:
+  health_check:
+  pprof:
+  zpages:
+
+service:
+  extensions: [health_check, pprof, zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp]
