@@ -35,6 +35,9 @@ service:
       exporters: [otlp, debug]
   telemetry:
     logs:
-      level: "debug"
+      level: debug
+      initial_fields:
+        service: my-instance
     metrics:
-      address: ":8888"
+      level: detailed
+      address: 0.0.0.0:8888
