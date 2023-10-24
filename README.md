@@ -1,6 +1,10 @@
 # OpenTelemetry Collector Workshop
 
-Example configurations for 
+Example configurations for:
 - Basics
+- Resources
+- Transformations
+- Security
+- Sampling
+- Scaling
 - Kubernetes
-- 
