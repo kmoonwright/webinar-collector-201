@@ -26,7 +26,11 @@ processors:
       - key: http.status_code
         action: convert
         converted_type: int
-        
+      # Write environment variables
+      - key: ${env:DB_KEY}
+        action: ${env:OPERATION}
+
+
 exporters:
   otlp:
     endpoint: otelcol:4317
