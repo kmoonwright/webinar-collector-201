@@ -1,0 +1,16 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+
+exporters: ${file:exporters.yaml} # imports config
+#   otlp:
+#     endpoint: otelcol.observability.svc.cluster.local:443
+
+service:
+  extensions: []
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: []
+      exporters: [otlp]
