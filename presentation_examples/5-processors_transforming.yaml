@@ -1,0 +1,131 @@
+processors:
+  logstransform:
+    operators:
+      - type: regex_parser
+        regex: '^(?P<time>\d{4}-\d{2}-\d{2}) (?P<sev>[A-Z]*) (?P<msg>.*)$'
+        timestamp:
+          parse_from: body.time
+          layout: "%Y-%m-%d"
+        severity:
+          parse_from: body.sev
+
+  metricstransform:
+    # rename system.cpu.usage to system.cpu.usage_time
+    - include: system.cpu.usage
+      action: update
+      new_name: system.cpu.usage_time
+    # add label to metrics
+    - include: system.cpu.usage
+      action: update
+      operations:
+        - action: add_label
+          new_label: version
+          new_value: opentelemetry collector {{version}}
+    # toggle the datatype of cpu usage from int (the default) to double
+    - include: system.cpu.usage
+      action: update
+      operations:
+        - action: toggle_scalar_data_type
+    # experimental_scale CPU usage from seconds to milliseconds
+    - include: system.cpu.usage
+      action: update
+      operations:
+        - action: experimental_scale_value
+          experimental_scale: 1000
+    # aggregate data points with state label value slab_reclaimable & slab_unreclaimable using summation into slab
+    - include: system.memory.usage
+      action: update
+      operations:
+        - action: aggregate_label_values
+          label: state
+          aggregated_values: [ slab_reclaimable, slab_unreclaimable ]
+          new_value: slab 
+          aggregation_type: sum
+
+  transform:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - keep_keys(attributes, ["service.name", "service.namespace", "cloud.region", "process.command_line"])
+          - replace_pattern(attributes["process.command_line"], "password\\=[^\\s]*(\\s?)", "password=***")
+          - limit(attributes, 100, [])
+          - truncate_all(attributes, 4096)
+      - context: span
+        statements:
+          - set(status.code, 1) where attributes["http.path"] == "/health"
+          - set(name, attributes["http.route"])
+          - replace_match(attributes["http.target"], "/user/*/list/*", "/user/{userId}/list/{listId}")
+          - limit(attributes, 100, [])
+          - truncate_all(attributes, 4096)
+
+    metric_statements:
+      - context: resource
+        statements:
+        - keep_keys(attributes, ["host.name"])
+        - truncate_all(attributes, 4096)
+      - context: metric
+        statements:
+          - set(description, "Sum") where type == "Sum"
+      - context: datapoint
+        statements:
+          - limit(attributes, 100, ["host.name"])
+          - truncate_all(attributes, 4096)
+          - convert_sum_to_gauge() where metric.name == "system.processes.count"
+          - convert_gauge_to_sum("cumulative", false) where metric.name == "prometheus_metric"
+          
+    log_statements:
+      - context: resource
+        statements:
+          - keep_keys(resource.attributes, ["service.name", "service.namespace", "cloud.region"])
+      - context: log
+        statements:
+          - set(severity_text, "FAIL") where body == "request failed"
+          - replace_all_matches(attributes, "/user/*/list/*", "/user/{userId}/list/{listId}")
+          - replace_all_patterns(attributes, "value", "/account/\\d{4}", "/account/{accountId}")
+          - set(body, attributes["http.route"])
+  
+  transform/spanevents:
+    error_mode: ignore
+    trace_statements:
+      - context: spanevent
+        statements:
+          # java grpc
+          - set(span.attributes["grpc.message.received_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "message" and attributes["message.type"] == "RECEIVED" and instrumentation_scope.name == "io.opentelemetry.grpc-1.6"
+          - set(span.attributes["grpc.message.sent_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "message" and attributes["message.type"] == "SENT" and instrumentation_scope.name == "io.opentelemetry.grpc-1.6"
+
+          # go grpc
+          - set(span.attributes["grpc.message.received_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "message" and attributes["message.type"] == "RECEIVED" and instrumentation_scope.name == "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+          - set(span.attributes["grpc.message.sent_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "message" and attributes["message.type"] == "SENT" and instrumentation_scope.name == "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+
+          # js-browser document-load
+          - set(span.attributes["webjs.connectEnd_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "connectEnd" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.connectStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "connectStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.domainLookupEnd_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "domainLookupEnd" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.domainLookupStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "domainLookupStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.domComplete_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "domComplete" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.domContentLoadedEventEnd_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "domContentLoadedEventEnd" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.domContentLoadedEventStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "domContentLoadedEventStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.domInteractive_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "domInteractive" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.fetchStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "fetchStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.firstContentfulPaint_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "firstContentfulPaint" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.firstPaint_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "firstPaint" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.loadEventEnd_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "loadEventEnd" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.loadEventStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "loadEventStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.requestStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "requestStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.responseEnd_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "responseEnd" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.responseStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "responseStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.secureConnectionStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "secureConnectionStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.unloadEventEnd_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "unloadEventEnd" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+          - set(span.attributes["webjs.unloadEventStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "unloadEventStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-document-load"
+
+          # js-browser fetch
+          - set(span.attributes["webjs.connectEnd_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "connectEnd" and instrumentation_scope.name == "@opentelemetry/instrumentation-fetch"
+          - set(span.attributes["webjs.connectStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "connectStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-fetch"
+          - set(span.attributes["webjs.domainLookupEnd_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "fetchdomainLookupEndStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-fetch"
+          - set(span.attributes["webjs.domainLookupStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "domainLookupStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-fetch"
+          - set(span.attributes["webjs.fetchStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "fetchStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-fetch"
+          - set(span.attributes["webjs.requestStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "requestStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-fetch"
+          - set(span.attributes["webjs.responseEnd_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "responseEnd" and instrumentation_scope.name == "@opentelemetry/instrumentation-fetch"
+          - set(span.attributes["webjs.responseStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "responseStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-fetch"
+          - set(span.attributes["webjs.secureConnectionStart_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "secureConnectionStart" and instrumentation_scope.name == "@opentelemetry/instrumentation-fetch"
