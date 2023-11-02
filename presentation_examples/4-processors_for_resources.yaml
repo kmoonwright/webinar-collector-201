@@ -1,0 +1,69 @@
+processors:
+  attributes/example:
+    actions:
+      - key: db.table
+        action: delete
+      - key: redacted_span
+        value: true
+        action: upsert
+      - key: copy_key
+        from_attribute: key_original
+        action: update
+      - key: http.status_code
+        action: convert
+        converted_type: int
+  attributes/accounts:
+    actions:
+      - key: account_id
+        value: 2245
+        action: insert
+      - key: account_password
+        action: delete
+      - key: account_email
+        action: hash
+
+  resourcedetection/env:
+    detectors: [env]
+    timeout: 2s
+    override: false
+  resourcedetection/system:
+    detectors: ["system"]
+    system:
+      hostname_sources: ["os"]
+  resourcedetection/docker:
+    detectors: [env, docker]
+    timeout: 2s
+    override: false
+  resourcedetection/ec2:
+    detectors: ["ec2"]
+    ec2:
+      # A list of regex's to match tag keys to add as resource attributes can be specified
+      tags:
+        - ^tag1$
+        - ^tag2$
+        - ^label.*$
+
+  resource:
+    attributes:
+    - key: cloud.availability_zone
+      value: "zone-1"
+      action: upsert
+    - key: k8s.cluster.name
+      from_attribute: k8s-cluster
+      action: insert
+    - key: redundant-attribute
+      action: delete
+
+  routing:
+    from_attribute: X-Tenant
+    default_exporters:
+    - jaeger
+    table:
+    - value: acme
+      exporters: [jaeger/acme]
+      
+exporters:
+  jaeger:
+    endpoint: localhost:14250
+  jaeger/acme:
+    endpoint: localhost:24250
