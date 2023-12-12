@@ -1,0 +1,61 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+  otlp/2:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:55690
+  # Traces, metrics
+  opencensus:
+  # Metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: otel-collector
+          scrape_interval: 5s
+          static_configs:
+            - targets: [localhost:8888]
+  # Traces, metrics, logs
+  kafka:
+    protocol_version: 2.0.0
+
+processors:
+  batch:
+  batch/test:
+
+exporters:
+  otlp:
+    endpoint: otelcol:4317
+  otlp/2:
+    endpoint: otelcol2:4317
+  zipkin:
+    endpoint: http://zipkin.example.com:9411/api/v2/spans
+  # Metrics
+  prometheus:
+    endpoint: localhost:8889
+    namespace: default
+  # Logs
+  file:
+    path: ./filename.json
+
+service:
+  extensions: [health_check, pprof, zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp]
+    traces/2:
+      receivers: [otlp/2]
+      processors: [batch/test]
+      exporters: [otlp/2, zipkin]
+    metrics:
+      receivers: [otlp, opencensus]
+      processors: [batch]
+      exporters: [otlp, prometheus]
+    logs:
+      receivers: [otlp, kafka]
+      processors: [batch]
+      exporters: [otlp, file]
