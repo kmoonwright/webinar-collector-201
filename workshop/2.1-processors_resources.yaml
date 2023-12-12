@@ -1,0 +1,70 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+processors:
+  batch:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 4000
+    spike_limit_mib: 500
+
+  attributes/example:
+    actions:
+      - key: db.table
+        action: delete
+      - key: redacted_span
+        value: true
+        action: upsert
+      - key: copy_key
+        from_attribute: key_original
+        action: update
+      - key: http.status_code
+        action: convert
+        converted_type: int
+
+  resource:
+    attributes:
+    - key: cloud.availability_zone
+      value: "zone-1"
+      action: upsert
+    - key: k8s.cluster.name
+      from_attribute: k8s-cluster
+      action: insert
+    - key: redundant-attribute
+      action: delete
+
+  resourcedetection:
+    detectors: [env, system, os, docker, ec2]
+    timeout: 2s
+    override: false
+
+  routing:
+    from_attribute: X-Tenant
+    default_exporters:
+    - jaeger
+    table:
+    - value: acme
+      exporters: [jaeger/acme]
+      
+
+exporters:
+  otlp:
+    endpoint: otelcol:4317
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource, memory_limiter, routing]
+      exporters: [otlp]
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resourcedetection, memory_limiter]
+      exporters: [otlp]
+    logs:
+      receivers: [otlp]
+      processors: [batch, attributes/example, memory_limiter]
+      exporters: [otlp]

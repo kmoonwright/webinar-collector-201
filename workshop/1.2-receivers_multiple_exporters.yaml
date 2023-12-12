@@ -1,0 +1,54 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+  # Traces, metrics
+  opencensus:
+  # Metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: otel-collector
+          scrape_interval: 5s
+          static_configs:
+            - targets: [localhost:8888]
+  # Traces, metrics, logs
+  kafka:
+    protocol_version: 2.0.0
+
+exporters:
+  otlp:
+    endpoint: "api.honeycomb.io:443"
+    headers:
+      "x-honeycomb-team": "YOUR_API_KEY"
+  otlp/metrics:
+    endpoint: "api.honeycomb.io:443"
+    headers:
+      "x-honeycomb-team": "YOUR_API_KEY"
+      "x-honeycomb-dataset": "YOUR_METRICS_DATASET"
+
+  # Traces
+  jaeger:
+    endpoint: jaeger-server:4317
+    tls:
+      cert_file: cert.pem
+      key_file: cert-key.pem
+  zipkin:
+    endpoint: http://zipkin.example.com:9411/api/v2/spans
+
+  # Logs
+  file:
+    path: ./filename.json
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp, opencensus]
+      exporters: [otlp, zipkin, jaeger]
+    metrics:
+      receivers: [otlp, prometheus]
+      exporters: [otlp/metrics]
+    logs:
+      receivers: [otlp, kafka]
+      exporters: [otlp, file]

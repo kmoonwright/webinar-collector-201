@@ -1,0 +1,131 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+processors:
+  batch:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 4000
+    spike_limit_mib: 50
+
+  logstransform:
+    operators:
+      - type: regex_parser
+        regex: '^(?P<time>\d{4}-\d{2}-\d{2}) (?P<sev>[A-Z]*) (?P<msg>.*)$'
+        timestamp:
+          parse_from: body.time
+          layout: "%Y-%m-%d"
+        severity:
+          parse_from: body.sev
+
+  metricstransform:
+    # rename system.cpu.usage to system.cpu.usage_time
+    - include: system.cpu.usage
+      action: update
+      new_name: system.cpu.usage_time
+    # add label to metrics
+    - include: system.cpu.usage
+      action: update
+      operations:
+        - action: add_label
+          new_label: version
+          new_value: opentelemetry collector {{version}}
+    # toggle the datatype of cpu usage from int (the default) to double
+    - include: system.cpu.usage
+      action: update
+      operations:
+        - action: toggle_scalar_data_type
+    # experimental_scale CPU usage from seconds to milliseconds
+    - include: system.cpu.usage
+      action: update
+      operations:
+        - action: experimental_scale_value
+          experimental_scale: 1000
+    # aggregate data points with state label value slab_reclaimable & slab_unreclaimable using summation into slab
+    - include: system.memory.usage
+      action: update
+      operations:
+        - action: aggregate_label_values
+          label: state
+          aggregated_values: [ slab_reclaimable, slab_unreclaimable ]
+          new_value: slab 
+          aggregation_type: sum
+
+  transform:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - keep_keys(attributes, ["service.name", "service.namespace", "cloud.region", "process.command_line"])
+          - replace_pattern(attributes["process.command_line"], "password\\=[^\\s]*(\\s?)", "password=***")
+          - limit(attributes, 100, [])
+          - truncate_all(attributes, 4096)
+      - context: span
+        statements:
+          - set(status.code, 1) where attributes["http.path"] == "/health"
+          - set(name, attributes["http.route"])
+          - replace_match(attributes["http.target"], "/user/*/list/*", "/user/{userId}/list/{listId}")
+          - limit(attributes, 100, [])
+          - truncate_all(attributes, 4096)
+
+    metric_statements:
+      - context: resource
+        statements:
+        - keep_keys(attributes, ["host.name"])
+        - truncate_all(attributes, 4096)
+      - context: metric
+        statements:
+          - set(description, "Sum") where type == "Sum"
+      - context: datapoint
+        statements:
+          - limit(attributes, 100, ["host.name"])
+          - truncate_all(attributes, 4096)
+          - convert_sum_to_gauge() where metric.name == "system.processes.count"
+          - convert_gauge_to_sum("cumulative", false) where metric.name == "prometheus_metric"
+          
+    log_statements:
+      - context: resource
+        statements:
+          - keep_keys(resource.attributes, ["service.name", "service.namespace", "cloud.region"])
+      - context: log
+        statements:
+          - set(severity_text, "FAIL") where body == "request failed"
+          - replace_all_matches(attributes, "/user/*/list/*", "/user/{userId}/list/{listId}")
+          - replace_all_patterns(attributes, "value", "/account/\\d{4}", "/account/{accountId}")
+          - set(body, attributes["http.route"])
+  
+  transform/spanevents:
+    error_mode: ignore
+    trace_statements:
+      - context: spanevent
+        statements:
+          # java grpc
+          - set(span.attributes["grpc.message.received_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "message" and attributes["message.type"] == "RECEIVED" and instrumentation_scope.name == "io.opentelemetry.grpc-1.6"
+          - set(span.attributes["grpc.message.sent_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "message" and attributes["message.type"] == "SENT" and instrumentation_scope.name == "io.opentelemetry.grpc-1.6"
+
+          # go grpc
+          - set(span.attributes["grpc.message.received_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "message" and attributes["message.type"] == "RECEIVED" and instrumentation_scope.name == "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+          - set(span.attributes["grpc.message.sent_ms"], (time_unix_nano - span.start_time_unix_nano) / 1000000) where name == "message" and attributes["message.type"] == "SENT" and instrumentation_scope.name == "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+
+
+exporters:
+  otlp:
+    endpoint: otelcol:4317
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, memory_limiter, transform, transform/spanevents]
+      exporters: [otlp]
+    metrics:
+      receivers: [otlp]
+      processors: [batch, memory_limiter, metricstransform, transform]
+      exporters: [otlp]
+    logs:
+      receivers: [otlp]
+      processors: [batch, memory_limiter, logstransform, transform]
+      exporters: [otlp]
