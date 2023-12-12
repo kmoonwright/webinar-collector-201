@@ -1,0 +1,72 @@
+processors:
+  filter/ottl:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["container.name"] == "app_container_1"'
+        - 'resource.attributes["host.name"] == "localhost"'
+        - 'name == "app_3"'
+      spanevent:
+        - 'attributes["grpc"] == true'
+        - 'IsMatch(name, ".*grpc.*")'
+    metrics:
+      metric:
+          - 'name == "my.metric" and resource.attributes["my_label"] == "abc123"'
+          - 'type == METRIC_DATA_TYPE_HISTOGRAM'
+      datapoint:
+          - 'metric.type == METRIC_DATA_TYPE_SUMMARY'
+          - 'resource.attributes["service.name"] == "my_service_name"'
+    logs:
+      log_record:
+        - 'IsMatch(body, ".*password.*")'
+        - 'severity_number < SEVERITY_NUMBER_WARN'
+
+  filter/httponly:
+    error_mode: ignore
+    traces:
+      span:
+        - attributes["http.request.method"] == nil
+  
+  filter/dropempty:
+    error_mode: ignore
+    metrics:
+      metric:
+        - type == METRIC_DATA_TYPE_NONE
+
+  filter/regexp:
+    logs:
+      include:
+        match_type: regexp
+        resource_attributes:
+          - key: host.name
+            value: prefix.*
+
+  filter/spans:
+    spans:
+      include:
+        match_type: strict
+        services:
+          - app_3
+      exclude:
+        match_type: regexp
+        services:
+          - app_1
+          - app_2
+        span_names:
+          - hello_world
+          - hello/world
+
+  redaction/allow:
+    allow_all_keys: false
+    allowed_keys:
+      - description
+      - group
+      - id
+  
+  redaction/update:
+    allow_all_keys: true
+    blocked_values:
+      - "^4[0-9]{12}(?:[0-9]{3})?$" ## Visa
+      - "^3[47][0-9]{13}$"       ## Amex
+      - "^(5[1-5][0-9]{14}|2(22[1-9][0-9]{12}|2[3-9][0-9]{13}|[3-6][0-9]{14}|7[0-1][0-9]{13}|720[0-9]{12}))$"       ## MasterCard
+      - "\b((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.|$)){4}\b" ## IPAddress
